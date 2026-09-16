@@ -381,6 +381,135 @@ const CSS_EXPORT_BASE = `
 // Abre uma janela de impressão com o resumo (tabela + gráficos) daquele ano — o usuário usa o
 // "Salvar como PDF" do próprio diálogo de impressão do navegador, sem precisar de nenhuma
 // biblioteca extra de geração de PDF.
+
+// Redesenha a pizza e a linha diária num canvas maior só pra exportação — os canvases da tela têm
+// só 220px de altura (pensados pro espaço de um painel na página); ampliados no PDF ficavam
+// borrados. Aqui eles nascem já grandes, então saem nítidos independente do tamanho que ocupem
+// no PDF final.
+function gerarImagemGraficoPizza(r) {
+  const linhasPizza = [...r.porTributo.entries()].sort((a, b) => b[1] - a[1]);
+  if (!linhasPizza.length) return '';
+  const corPorTributo = new Map(linhasPizza.map(([nome], i) => [nome, CORES_GRAFICO[i % CORES_GRAFICO.length]]));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 900;
+  canvas.height = 700;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  document.body.appendChild(canvas);
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'pie',
+    data: {
+      labels: linhasPizza.map(([nome]) => nome),
+      datasets: [{
+        data: linhasPizza.map(([, v]) => v),
+        backgroundColor: linhasPizza.map(([nome]) => corPorTributo.get(nome)),
+        borderColor: '#fff',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 16, font: { size: 15 }, padding: 14 } },
+      },
+    },
+  });
+
+  const imagem = canvas.toDataURL('image/png');
+  chart.destroy();
+  canvas.remove();
+  return imagem;
+}
+
+function gerarImagemGraficoLinha(r) {
+  const linhasData = [...r.porData.entries()].sort((a, b) => {
+    const [da, ma, ya] = a[0].split('/'); const [db, mb, yb] = b[0].split('/');
+    return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
+  });
+  if (!linhasData.length) return '';
+  const valoresDiarios = linhasData.map(([, v]) => v);
+  const n = valoresDiarios.length;
+  const media = n ? valoresDiarios.reduce((s, v) => s + v, 0) / n : 0;
+  const variancia = n ? valoresDiarios.reduce((s, v) => s + (v - media) ** 2, 0) / n : 0;
+  const desvioPadrao = Math.sqrt(variancia);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1300;
+  canvas.height = 700;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  document.body.appendChild(canvas);
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: linhasData.map(([data]) => data),
+      datasets: [
+        {
+          label: 'Arrecadado no dia',
+          data: valoresDiarios,
+          fill: true,
+          backgroundColor: 'rgba(47, 93, 138, 0.15)',
+          borderColor: '#2f5d8a',
+          pointRadius: 3,
+          tension: 0.15,
+          order: 1,
+        },
+        {
+          label: `Média (R$ ${fmtBRL(media)})`,
+          data: valoresDiarios.map(() => media),
+          borderColor: '#c15b4a',
+          borderDash: [6, 4],
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+          order: 2,
+        },
+        {
+          label: `+1 desvio padrão`,
+          data: valoresDiarios.map(() => media + desvioPadrao),
+          borderColor: 'rgba(154,165,177,.9)',
+          borderDash: [2, 3],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: '+1',
+          backgroundColor: 'rgba(154,165,177,.10)',
+          order: 3,
+        },
+        {
+          label: `-1 desvio padrão`,
+          data: valoresDiarios.map(() => Math.max(0, media - desvioPadrao)),
+          borderColor: 'rgba(154,165,177,.9)',
+          borderDash: [2, 3],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          order: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 16, font: { size: 13 }, padding: 12 } },
+      },
+      scales: {
+        x: { ticks: { maxRotation: 70, minRotation: 45, autoSkip: true, font: { size: 11 } } },
+        y: { ticks: { font: { size: 12 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+      },
+    },
+  });
+
+  const imagem = canvas.toDataURL('image/png');
+  chart.destroy();
+  canvas.remove();
+  return imagem;
+}
+
 // Gera, num canvas temporário (fora da tela, sem afetar os gráficos já visíveis na página), um
 // gráfico de barras empilhadas com a movimentação de cada dia discriminada por tributo — mesmas
 // cores do gráfico de pizza — e devolve como imagem (data URL) pra embutir no PDF exportado.
@@ -395,8 +524,8 @@ function gerarImagemGraficoDiario(r) {
   const corPorTributo = new Map(linhasPizza.map(([nome], i) => [nome, CORES_GRAFICO[i % CORES_GRAFICO.length]]));
 
   const canvas = document.createElement('canvas');
-  canvas.width = 900;
-  canvas.height = 320;
+  canvas.width = 1300;
+  canvas.height = 500;
   canvas.style.position = 'fixed';
   canvas.style.left = '-9999px';
   document.body.appendChild(canvas);
@@ -415,11 +544,11 @@ function gerarImagemGraficoDiario(r) {
       responsive: false,
       animation: false,
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } },
+        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 } } },
       },
       scales: {
-        x: { stacked: true, ticks: { font: { size: 8 }, maxRotation: 70, minRotation: 45 } },
-        y: { stacked: true, ticks: { font: { size: 9 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+        x: { stacked: true, ticks: { font: { size: 11 }, maxRotation: 70, minRotation: 45 } },
+        y: { stacked: true, ticks: { font: { size: 12 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
       },
     },
   });
@@ -443,10 +572,8 @@ function exportarAnoPDF(ano) {
   };
   const tabelaHTML = construirTabelaResumoHTML(r, `pdf${ano}`);
   const tabelaDiariaHTML = construirTabelaDiariaHTML(r, `pdfdia${ano}`);
-  const canvasPizza = document.getElementById(`chartPizza-${ano}`);
-  const canvasLinha = document.getElementById(`chartLinha-${ano}`);
-  const imgPizza = canvasPizza ? canvasPizza.toDataURL('image/png') : '';
-  const imgLinha = canvasLinha ? canvasLinha.toDataURL('image/png') : '';
+  const imgPizza = gerarImagemGraficoPizza(r);
+  const imgLinha = gerarImagemGraficoLinha(r);
   const imgDiario = gerarImagemGraficoDiario(r);
 
   const janela = window.open('', '_blank');
@@ -932,8 +1059,8 @@ function renderizarVariacao(anosMarcados, somaPorAnoTributo, tributos) {
 function gerarImagemGraficoComparativo() {
   if (!chartComparativo) return '';
   const canvas = document.createElement('canvas');
-  canvas.width = 1000;
-  canvas.height = 380;
+  canvas.width = 1300;
+  canvas.height = 500;
   canvas.style.position = 'fixed';
   canvas.style.left = '-9999px';
   document.body.appendChild(canvas);
@@ -948,11 +1075,11 @@ function gerarImagemGraficoComparativo() {
       responsive: false,
       animation: false,
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 } } },
       },
       scales: {
-        x: { ticks: { font: { size: 10 }, maxRotation: 60, minRotation: 30 } },
-        y: { ticks: { font: { size: 10 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+        x: { ticks: { font: { size: 12 }, maxRotation: 60, minRotation: 30 } },
+        y: { ticks: { font: { size: 12 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
       },
     },
   });
