@@ -1,0 +1,20 @@
+# Arquivos de teste/rascunho que não devem ir pro repositório
+teste*.pdf
+*.test.pdf
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Node (caso alguma ferramenta de build seja adicionada no futuro)
+node_modules/
+npm-debug.log*
+
+# Logs
+*.log
