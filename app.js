@@ -329,6 +329,55 @@ async function handleAlimentarAnoComPDF(ano, file) {
 // Abre uma janela de impressão com o resumo (tabela + gráficos) daquele ano — o usuário usa o
 // "Salvar como PDF" do próprio diálogo de impressão do navegador, sem precisar de nenhuma
 // biblioteca extra de geração de PDF.
+// Gera, num canvas temporário (fora da tela, sem afetar os gráficos já visíveis na página), um
+// gráfico de barras empilhadas com a movimentação de cada dia discriminada por tributo — mesmas
+// cores do gráfico de pizza — e devolve como imagem (data URL) pra embutir no PDF exportado.
+function gerarImagemGraficoDiario(r) {
+  const linhasData = [...r.porData.entries()].sort((a, b) => {
+    const [da, ma, ya] = a[0].split('/'); const [db, mb, yb] = b[0].split('/');
+    return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
+  });
+  if (!linhasData.length) return '';
+
+  const linhasPizza = [...r.porTributo.entries()].sort((a, b) => b[1] - a[1]);
+  const corPorTributo = new Map(linhasPizza.map(([nome], i) => [nome, CORES_GRAFICO[i % CORES_GRAFICO.length]]));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 900;
+  canvas.height = 320;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  document.body.appendChild(canvas);
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: linhasData.map(([data]) => data),
+      datasets: linhasPizza.map(([nome]) => ({
+        label: nome,
+        data: linhasData.map(([data]) => r.porDataTributo.get(data)?.get(nome) || 0),
+        backgroundColor: corPorTributo.get(nome),
+      })),
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } },
+      },
+      scales: {
+        x: { stacked: true, ticks: { font: { size: 8 }, maxRotation: 70, minRotation: 45 } },
+        y: { stacked: true, ticks: { font: { size: 9 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+      },
+    },
+  });
+
+  const imagem = canvas.toDataURL('image/png');
+  chart.destroy();
+  canvas.remove();
+  return imagem;
+}
+
 function exportarAnoPDF(ano) {
   const todos = carregarAnosSalvos();
   const info = todos[ano];
@@ -346,6 +395,7 @@ function exportarAnoPDF(ano) {
   const canvasLinha = document.getElementById(`chartLinha-${ano}`);
   const imgPizza = canvasPizza ? canvasPizza.toDataURL('image/png') : '';
   const imgLinha = canvasLinha ? canvasLinha.toDataURL('image/png') : '';
+  const imgDiario = gerarImagemGraficoDiario(r);
 
   const janela = window.open('', '_blank');
   if (!janela) {
@@ -372,6 +422,7 @@ function exportarAnoPDF(ano) {
   tr.detail-row table{margin:2px 0 8px;}
   .caret{display:none;}
   h2.secao{font-size:.95rem;margin:26px 0 8px;padding-top:14px;border-top:1px solid #dde1e6;}
+  img.grafico-diario{max-width:100%;border:1px solid #dde1e6;border-radius:8px;margin-bottom:16px;}
   @media print{ body{margin:10mm;} h2.secao{break-before:auto;} }
 </style>
 </head><body>
@@ -383,6 +434,7 @@ function exportarAnoPDF(ano) {
 </div>
 <table>${tabelaHTML}</table>
 <h2 class="secao">Movimentação diária</h2>
+${imgDiario ? `<img class="grafico-diario" src="${imgDiario}" alt="Movimentação diária por tributo">` : ''}
 <table>${tabelaDiariaHTML}</table>
 </body></html>`);
   janela.document.close();
