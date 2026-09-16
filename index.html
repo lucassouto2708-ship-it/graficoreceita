@@ -61,10 +61,13 @@
   .chartjs-tooltip-html .tt-dot{display:inline-block;width:9px;height:9px;border-radius:2px;flex:none;}
   .ano-chip{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:20px;padding:6px 12px 6px 10px;font-size:.85rem;cursor:pointer;user-select:none;}
   .ano-chip input{margin:0;}
+  .ano-chip input[type="color"]{width:20px;height:20px;padding:0;border:1px solid var(--border);border-radius:5px;cursor:pointer;background:none;}
   .ano-chip .del{color:var(--muted);cursor:pointer;font-size:.9rem;margin-left:4px;}
   .ano-chip .del:hover{color:var(--warn);}
-  .ano-card-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px;}
+  .ano-card-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px;gap:12px;flex-wrap:wrap;}
   .ano-card-header h2{margin:0;}
+  .ano-card-actions{display:flex;align-items:center;gap:4px;}
+  .ano-card-actions .secondary{padding:6px 12px;font-size:.8rem;}
   .ano-card-header .btn-remover-ano{background:none;border:none;color:var(--muted);font-size:.8rem;cursor:pointer;padding:4px 8px;}
   .ano-card-header .btn-remover-ano:hover{color:var(--warn);}
   .destaques-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:16px;}
@@ -86,6 +89,7 @@
   .mov-form input{padding:8px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;}
   .mov-form input.mov-tributo{width:220px;}
   .mov-form input.mov-valor{width:150px;}
+  .mov-pdf-bulk{margin-bottom:16px;padding-bottom:16px;border-bottom:1px dashed var(--border);}
   .mov-diaria-toggle{display:flex;align-items:center;gap:8px;background:none;border:none;padding:0;cursor:pointer;color:inherit;width:100%;text-align:left;}
   .mov-diaria-toggle:hover h2{color:var(--accent);}
   .mov-diaria-toggle .caret{display:inline-block;color:var(--muted);transition:transform .15s;font-size:.75rem;}
@@ -141,7 +145,12 @@
   <div id="anosCarregados"></div>
 
   <div class="panel" id="comparativo" style="display:none;">
-    <h2>Comparativo entre anos</h2>
+    <div class="ano-card-header">
+      <h2 style="margin-bottom:4px;">Comparativo entre anos</h2>
+      <div class="ano-card-actions">
+        <button class="secondary" id="btnExportarComparativoPDF" type="button">Exportar PDF</button>
+      </div>
+    </div>
     <p class="hint" style="margin-top:0;">Marque os anos que quer comparar. O comparativo soma só o período (dia/mês) em comum entre os anos marcados, pra não comparar 3 meses com o ano inteiro.</p>
     <div class="row" id="anosSalvosLista"></div>
     <p id="periodoComparado" class="hint"></p>

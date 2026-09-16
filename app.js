@@ -19,6 +19,7 @@ const anosSalvosLista = document.getElementById('anosSalvosLista');
 const periodoComparadoEl = document.getElementById('periodoComparado');
 const destaquesVariacaoEl = document.getElementById('destaquesVariacao');
 const tabVariacaoEl = document.getElementById('tabVariacao');
+const btnExportarComparativoPDF = document.getElementById('btnExportarComparativoPDF');
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
 
@@ -175,6 +176,50 @@ function excluirAnoDoHistorico(ano) {
   localStorage.setItem(ANOS_KEY, JSON.stringify(todos));
 }
 
+// Soma o resultado de um PDF recém-processado a um ano JÁ salvo, em vez de substituir — é o
+// "lançamento em massa": em vez de digitar dia a dia na Movimentação diária, sobe um PDF (ex.: só o
+// período que faltava) e todos os tributos/datas dele entram somados ao que já tinha. Se o ano ainda
+// não existir no histórico, comporta-se como salvar pela primeira vez.
+function mesclarResultadoNoAno(ano, r) {
+  const todos = carregarAnosSalvos();
+  const existente = todos[ano];
+  if (!existente) {
+    salvarAnoNoHistorico(ano, r);
+    return;
+  }
+
+  existente.porTributo = existente.porTributo || {};
+  existente.porData = existente.porData || {};
+  existente.porDataTributo = existente.porDataTributo || {};
+  existente.porSub = existente.porSub || {};
+
+  for (const [nome, v] of r.porTributo.entries()) {
+    existente.porTributo[nome] = (existente.porTributo[nome] || 0) + v;
+  }
+  for (const [data, v] of r.porData.entries()) {
+    existente.porData[data] = (existente.porData[data] || 0) + v;
+  }
+  for (const [data, mapaTrib] of r.porDataTributo.entries()) {
+    existente.porDataTributo[data] = existente.porDataTributo[data] || {};
+    for (const [nome, v] of mapaTrib.entries()) {
+      existente.porDataTributo[data][nome] = (existente.porDataTributo[data][nome] || 0) + v;
+    }
+  }
+  for (const [nome, mapaSub] of r.porSub.entries()) {
+    existente.porSub[nome] = existente.porSub[nome] || {};
+    for (const [sub, v] of mapaSub.entries()) {
+      existente.porSub[nome][sub] = (existente.porSub[nome][sub] || 0) + v;
+    }
+  }
+
+  existente.totalGeral = Object.values(existente.porTributo).reduce((s, v) => s + v, 0);
+  existente.nomeArquivo = existente.nomeArquivo ? `${existente.nomeArquivo} + ${r.nomeArquivo}` : r.nomeArquivo;
+  existente.salvoEm = new Date().toISOString();
+
+  todos[ano] = existente;
+  localStorage.setItem(ANOS_KEY, JSON.stringify(todos));
+}
+
 function parseValorInput(s) {
   if (!s) return NaN;
   return parseValorBR(String(s).replace(/R\$/gi, '').trim());
@@ -248,6 +293,103 @@ function handleAdicionarMovimento(ano) {
   }
 }
 
+// Processa um PDF escolhido dentro do card de um ano e soma o resultado ao que já existe (mesmo
+// pipeline de extração/OCR/parsing do upload principal, só que o destino é `mesclarResultadoNoAno`
+// em vez de `renderizarResultado` — não mexe no card do "processamento atual" lá em cima).
+async function handleAlimentarAnoComPDF(ano, file) {
+  const card = document.getElementById(`ano-card-${ano}`);
+  if (!card) return;
+  const statusEl2 = card.querySelector('.mov-pdf-status');
+  const btn = card.querySelector('.btn-mov-pdf');
+  const setStatus = (msg, ok) => { statusEl2.textContent = msg; statusEl2.style.color = ok === undefined ? 'var(--muted)' : (ok ? 'var(--good)' : 'var(--warn)'); };
+
+  btn.disabled = true;
+  try {
+    const texto = await extrairTexto(file, (frac, msg) => setStatus(msg));
+    const resultado = parseMinuta(texto);
+    resultado.nomeArquivo = file.name;
+    mesclarResultadoNoAno(ano, resultado);
+    movDiariaAbertos.add(String(ano));
+    renderizarCardsAnos();
+    atualizarComparativo();
+
+    const novoCard = document.getElementById(`ano-card-${ano}`);
+    if (novoCard) {
+      const novoStatus = novoCard.querySelector('.mov-pdf-status');
+      novoStatus.textContent = `"${file.name}" somado ao ano ${ano} (Total Geral do PDF: R$ ${fmtBRL(resultado.totalGeral)}).`;
+      novoStatus.style.color = 'var(--good)';
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus('Erro ao processar: ' + err.message, false);
+    btn.disabled = false;
+  }
+}
+
+// Abre uma janela de impressão com o resumo (tabela + gráficos) daquele ano — o usuário usa o
+// "Salvar como PDF" do próprio diálogo de impressão do navegador, sem precisar de nenhuma
+// biblioteca extra de geração de PDF.
+function exportarAnoPDF(ano) {
+  const todos = carregarAnosSalvos();
+  const info = todos[ano];
+  if (!info) return;
+  const r = {
+    porTributo: objParaMap(info.porTributo, 1),
+    porSub: objParaMap(info.porSub, 2),
+    porData: objParaMap(info.porData, 1),
+    porDataTributo: objParaMap(info.porDataTributo, 2),
+    totalGeral: info.totalGeral,
+  };
+  const tabelaHTML = construirTabelaResumoHTML(r, `pdf${ano}`);
+  const tabelaDiariaHTML = construirTabelaDiariaHTML(r, `pdfdia${ano}`);
+  const canvasPizza = document.getElementById(`chartPizza-${ano}`);
+  const canvasLinha = document.getElementById(`chartLinha-${ano}`);
+  const imgPizza = canvasPizza ? canvasPizza.toDataURL('image/png') : '';
+  const imgLinha = canvasLinha ? canvasLinha.toDataURL('image/png') : '';
+
+  const janela = window.open('', '_blank');
+  if (!janela) {
+    alert('O navegador bloqueou a janela de impressão. Permita pop-ups pra exportar o PDF deste ano.');
+    return;
+  }
+  janela.document.write(`<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Apuração ${escapeHTML(String(ano))}</title>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;color:#1f2430;margin:28px;}
+  h1{font-size:1.25rem;margin:0 0 2px;}
+  .sub{color:#667085;font-size:.85rem;margin-bottom:20px;}
+  .charts{display:flex;gap:16px;margin-bottom:22px;flex-wrap:wrap;}
+  .charts img{max-width:47%;border:1px solid #dde1e6;border-radius:8px;}
+  table{width:100%;border-collapse:collapse;font-size:.82rem;}
+  th,td{padding:6px 8px;border-bottom:1px solid #dde1e6;text-align:left;}
+  th{color:#667085;font-size:.75rem;text-transform:uppercase;}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+  tr.total td{font-weight:700;border-top:2px solid #1f2430;border-bottom:none;}
+  tr.sub td{color:#667085;}
+  tr.sub td:first-child{padding-left:22px;}
+  tr.detail-row{display:table-row !important;}
+  tr.detail-row td{padding:0;}
+  tr.detail-row table{margin:2px 0 8px;}
+  .caret{display:none;}
+  h2.secao{font-size:.95rem;margin:26px 0 8px;padding-top:14px;border-top:1px solid #dde1e6;}
+  @media print{ body{margin:10mm;} h2.secao{break-before:auto;} }
+</style>
+</head><body>
+<h1>Apuração de Arrecadação Contábil — Ano ${escapeHTML(String(ano))}</h1>
+<div class="sub">${escapeHTML(info.nomeArquivo || '')} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
+<div class="charts">
+  ${imgPizza ? `<img src="${imgPizza}" alt="Arrecadado por tributo">` : ''}
+  ${imgLinha ? `<img src="${imgLinha}" alt="Arrecadação diária">` : ''}
+</div>
+<table>${tabelaHTML}</table>
+<h2 class="secao">Movimentação diária</h2>
+<table>${tabelaDiariaHTML}</table>
+</body></html>`);
+  janela.document.close();
+  janela.focus();
+  setTimeout(() => { try { janela.print(); } catch (e) { /* usuário pode imprimir manualmente */ } }, 400);
+}
+
 // Tabela de "Movimentação diária": uma linha por data (mais recente primeiro), clicável pra abrir
 // o detalhamento por tributo daquele dia — reaproveita o mesmo acordeão (classes/IDs) do resumo geral.
 function construirTabelaDiariaHTML(r, idPrefix) {
@@ -309,7 +451,10 @@ function renderizarCardsAnos() {
     <div class="panel" id="ano-card-${ano}">
       <div class="ano-card-header">
         <h2>Ano ${ano} <span class="hint" style="margin:0;">— ${escapeHTML(todos[ano].nomeArquivo || '')}</span></h2>
-        <button class="btn-remover-ano" data-ano="${ano}">Remover ano</button>
+        <div class="ano-card-actions">
+          <button class="secondary btn-exportar-pdf-ano" data-ano="${ano}" type="button">Exportar PDF</button>
+          <button class="btn-remover-ano" data-ano="${ano}">Remover ano</button>
+        </div>
       </div>
       <div class="charts-grid" style="margin-bottom:18px;">
         <div class="chart-box">
@@ -329,6 +474,12 @@ function renderizarCardsAnos() {
           <h2 style="font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;margin:0;">Movimentação diária</h2>
         </button>
         <div class="mov-diaria-body" id="mov-diaria-body-${ano}" style="display:none;">
+          <div class="mov-pdf-bulk">
+            <label class="hint" style="display:block;margin-bottom:6px;">Lançamento em massa: suba um PDF (ex.: só o período que faltava) e todos os tributos dele são somados ao que este ano já tem — sem substituir nada.</label>
+            <input type="file" accept="application/pdf" class="mov-pdf-input" id="mov-pdf-input-${ano}" style="display:none;">
+            <button class="secondary btn-mov-pdf" data-ano="${ano}" type="button">Escolher PDF e somar a este ano</button>
+            <span class="mov-pdf-status hint" style="display:block;margin-top:6px;"></span>
+          </div>
           <p class="hint" style="margin-top:8px;">Clique numa data pra ver o detalhamento por tributo. Lance aqui a arrecadação do fechamento do dia.</p>
           <table id="tabDiaria-${ano}"></table>
           <div class="row mov-form" style="margin-top:12px;">
@@ -374,6 +525,19 @@ function renderizarCardsAnos() {
     renderizarListaAnos();
   }));
 
+  anosCarregadosEl.querySelectorAll('.btn-exportar-pdf-ano').forEach(btn => btn.addEventListener('click', () => {
+    exportarAnoPDF(btn.getAttribute('data-ano'));
+  }));
+
+  anosCarregadosEl.querySelectorAll('.btn-mov-pdf').forEach(btn => btn.addEventListener('click', () => {
+    document.getElementById(`mov-pdf-input-${btn.getAttribute('data-ano')}`).click();
+  }));
+  anosCarregadosEl.querySelectorAll('.mov-pdf-input').forEach(inp => inp.addEventListener('change', () => {
+    if (!inp.files.length) return;
+    const ano = inp.id.replace('mov-pdf-input-', '');
+    handleAlimentarAnoComPDF(ano, inp.files[0]);
+  }));
+
   anosCarregadosEl.querySelectorAll('.btn-add-mov').forEach(btn => btn.addEventListener('click', () => {
     handleAdicionarMovimento(btn.getAttribute('data-ano'));
   }));
@@ -414,12 +578,16 @@ function renderizarListaAnos() {
   anosSalvosLista.innerHTML = anos.map((ano, i) => `
     <label class="ano-chip">
       <input type="checkbox" class="chk-ano" value="${ano}" checked>
+      <input type="color" class="chk-ano-cor" data-ano="${ano}" value="${corDoAno(todos, ano, i)}" title="Cor deste ano no gráfico comparativo">
       ${ano} <span class="hint" style="margin:0;">(${escapeHTML(todos[ano].nomeArquivo || '')})</span>
       <span class="del" data-ano="${ano}" title="Remover este ano do histórico">✕</span>
     </label>
   `).join('');
 
   anosSalvosLista.querySelectorAll('.chk-ano').forEach(chk => chk.addEventListener('change', atualizarComparativo));
+  anosSalvosLista.querySelectorAll('.chk-ano-cor').forEach(inp => inp.addEventListener('input', () => {
+    definirCorAno(inp.getAttribute('data-ano'), inp.value);
+  }));
   anosSalvosLista.querySelectorAll('.del').forEach(el => el.addEventListener('click', (ev) => {
     ev.preventDefault();
     excluirAnoDoHistorico(el.getAttribute('data-ano'));
@@ -427,6 +595,21 @@ function renderizarListaAnos() {
     renderizarListaAnos();
   }));
 
+  atualizarComparativo();
+}
+
+// Cor de um ano no gráfico comparativo: usa a escolhida manualmente se existir, senão cai na
+// paleta padrão (pela posição do ano na lista) — é só o ponto de partida, o usuário pode trocar
+// livremente pra deixar anos parecidos (ex.: dois tons de azul) mais distintos entre si.
+function corDoAno(todos, ano, indice) {
+  return (todos[ano] && todos[ano].corComparativo) || CORES_GRAFICO[indice % CORES_GRAFICO.length];
+}
+
+function definirCorAno(ano, cor) {
+  const todos = carregarAnosSalvos();
+  if (!todos[ano]) return;
+  todos[ano].corComparativo = cor;
+  localStorage.setItem(ANOS_KEY, JSON.stringify(todos));
   atualizarComparativo();
 }
 
@@ -511,7 +694,7 @@ function atualizarComparativo() {
       datasets: anosMarcados.map((ano, i) => ({
         label: String(ano),
         data: tributos.map(t => somaPorAnoTributo[ano]?.[t] || 0),
-        backgroundColor: CORES_GRAFICO[i % CORES_GRAFICO.length],
+        backgroundColor: corDoAno(todos, ano, i),
       })),
     },
     options: {
@@ -636,6 +819,58 @@ function renderizarVariacao(anosMarcados, somaPorAnoTributo, tributos) {
 
   tabVariacaoEl.innerHTML = html;
 }
+
+// Mesma ideia do "Exportar PDF" de cada ano, mas pro painel de comparativo inteiro: gráfico de
+// barras + destaques (maior crescimento/queda) + tabela de variação ano a ano, numa janela de
+// impressão pra salvar como PDF pelo navegador.
+btnExportarComparativoPDF.addEventListener('click', () => {
+  const anosMarcados = [...anosSalvosLista.querySelectorAll('.chk-ano:checked')].map(el => el.value);
+  if (anosMarcados.length < 2) {
+    alert('Marque pelo menos 2 anos pra exportar o comparativo.');
+    return;
+  }
+
+  const imgComparativo = chartComparativo ? document.getElementById('chartComparativo').toDataURL('image/png') : '';
+
+  const janela = window.open('', '_blank');
+  if (!janela) {
+    alert('O navegador bloqueou a janela de impressão. Permita pop-ups pra exportar o PDF do comparativo.');
+    return;
+  }
+  janela.document.write(`<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Comparativo entre anos</title>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;color:#1f2430;margin:28px;}
+  h1{font-size:1.25rem;margin:0 0 2px;}
+  .sub{color:#667085;font-size:.85rem;margin-bottom:20px;}
+  img.grafico{max-width:100%;border:1px solid #dde1e6;border-radius:8px;margin-bottom:20px;}
+  .destaques-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:22px;}
+  .destaque-card{border:1px solid #dde1e6;border-radius:8px;padding:10px 12px;}
+  .destaque-card.subiu{border-left:4px solid #1e7d4d;}
+  .destaque-card.desceu{border-left:4px solid #b6531c;}
+  .destaque-card .label{font-size:.72rem;color:#667085;text-transform:uppercase;margin-bottom:3px;}
+  .destaque-card .valor{font-weight:700;}
+  .variacao-pos{color:#1e7d4d;font-weight:600;}
+  .variacao-neg{color:#b6531c;font-weight:600;}
+  .variacao-zero{color:#667085;}
+  table{width:100%;border-collapse:collapse;font-size:.8rem;}
+  th,td{padding:6px 8px;border-bottom:1px solid #dde1e6;text-align:right;white-space:nowrap;}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:#667085;font-size:.72rem;text-transform:uppercase;}
+  tr.total td{font-weight:700;border-top:2px solid #1f2430;}
+  @media print{ body{margin:10mm;} }
+</style>
+</head><body>
+<h1>Comparativo entre anos — ${escapeHTML(anosMarcados.join(', '))}</h1>
+<div class="sub">${escapeHTML(periodoComparadoEl.textContent)} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
+${imgComparativo ? `<img class="grafico" src="${imgComparativo}" alt="Gráfico comparativo">` : ''}
+${destaquesVariacaoEl.innerHTML}
+<div style="margin-top:20px;">${tabVariacaoEl.outerHTML}</div>
+</body></html>`);
+  janela.document.close();
+  janela.focus();
+  setTimeout(() => { try { janela.print(); } catch (e) { /* usuário pode imprimir manualmente */ } }, 400);
+});
 
 btnProcess.addEventListener('click', async () => {
   if (!currentFile) return;
