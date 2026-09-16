@@ -326,6 +326,58 @@ async function handleAlimentarAnoComPDF(ano, file) {
   }
 }
 
+// CSS compartilhado pelos dois PDFs exportados (por ano e comparativo) — via impressão do navegador.
+// Os pontos que corrigem os defeitos visuais que apareciam antes:
+// - "tr, tbody.grupo-data{break-inside:avoid}" impede que uma linha (ou uma data + seu detalhamento)
+//   seja CORTADA NO MEIO entre duas páginas impressas — era o que fazia, por exemplo, "10/09/2026"
+//   sair partido em "1" no fim de uma página e "0/09/2026" no começo da seguinte.
+// - "thead{display:table-header-group}" repete o cabeçalho da coluna em toda página impressa —
+//   essencial numa tabela de "Movimentação diária" que pode passar de 10 páginas.
+// - "h2.secao{break-before:page}" garante que a "Movimentação diária" comece numa página nova e
+//   limpa, em vez de colar goela abaixo da tabela de resumo.
+const CSS_EXPORT_BASE = `
+  html{background:#fff;color-scheme:light;}
+  body{font-family:Segoe UI,Arial,sans-serif;color:#1f2430;background:#fff;margin:28px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .cabecalho{display:flex;align-items:center;gap:10px;margin-bottom:2px;}
+  h1{font-size:1.3rem;margin:0;}
+  .selo{background:#eaf1f8;color:#2f5d8a;font-weight:700;font-size:.8rem;padding:3px 10px;border-radius:20px;}
+  .sub{color:#667085;font-size:.85rem;margin-bottom:16px;}
+  .total-destaque{display:flex;align-items:baseline;gap:8px;background:#eaf1f8;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:.85rem;color:#2f5d8a;}
+  .total-destaque strong{font-size:1.4rem;}
+  table{width:100%;border-collapse:collapse;font-size:.82rem;}
+  thead{display:table-header-group;}
+  th,td{padding:6px 8px;border-bottom:1px solid #dde1e6;text-align:left;}
+  th{color:#667085;font-size:.72rem;text-transform:uppercase;letter-spacing:.02em;}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  tr.total td{font-weight:700;border-top:2px solid #1f2430;border-bottom:none;background:#f5f7fa;}
+  tr.tributo-row td{background:#fafbfc;font-weight:600;}
+  tr.sub td{color:#667085;font-weight:400;}
+  tr.sub td:first-child{padding-left:22px;}
+  tr.detail-row{display:table-row !important;}
+  tr.detail-row td{padding:0;background:none;}
+  tr.detail-row table{margin:2px 0 8px;}
+  .caret{display:none;}
+  tr, tbody.grupo-data{break-inside:avoid;page-break-inside:avoid;}
+  h2.secao{font-size:1rem;margin:0 0 10px;padding-top:16px;border-top:1px solid #dde1e6;break-before:page;page-break-before:always;}
+  h2.secao.secao-inicial{break-before:avoid;page-break-before:avoid;border-top:none;padding-top:0;margin-top:24px;}
+  .charts{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap;}
+  .chart-card{flex:1;min-width:260px;border:1px solid #dde1e6;border-radius:10px;padding:12px;background:#fafbfc;break-inside:avoid;}
+  .chart-card h3{margin:0 0 8px;font-size:.72rem;color:#667085;text-transform:uppercase;letter-spacing:.03em;}
+  .chart-card img{width:100%;display:block;}
+  .chart-full{margin:18px 0 16px;}
+  .destaques-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:18px 0 22px;}
+  .destaque-card{border:1px solid #dde1e6;border-radius:10px;padding:10px 12px;break-inside:avoid;}
+  .destaque-card.subiu{border-left:4px solid #1e7d4d;}
+  .destaque-card.desceu{border-left:4px solid #b6531c;}
+  .destaque-card .label{font-size:.68rem;color:#667085;text-transform:uppercase;letter-spacing:.02em;margin-bottom:3px;}
+  .destaque-card .valor{font-weight:700;}
+  .variacao-pos{color:#1e7d4d;font-weight:600;}
+  .variacao-neg{color:#b6531c;font-weight:600;}
+  .variacao-zero{color:#667085;}
+  .rodape{margin-top:26px;padding-top:10px;border-top:1px solid #dde1e6;color:#98a2b3;font-size:.72rem;text-align:center;}
+  @media print{ body{margin:12mm;} }
+`;
+
 // Abre uma janela de impressão com o resumo (tabela + gráficos) daquele ano — o usuário usa o
 // "Salvar como PDF" do próprio diálogo de impressão do navegador, sem precisar de nenhuma
 // biblioteca extra de geração de PDF.
@@ -405,37 +457,31 @@ function exportarAnoPDF(ano) {
   janela.document.write(`<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="UTF-8"><title>Apuração ${escapeHTML(String(ano))}</title>
 <style>
-  body{font-family:Segoe UI,Arial,sans-serif;color:#1f2430;margin:28px;}
-  h1{font-size:1.25rem;margin:0 0 2px;}
-  .sub{color:#667085;font-size:.85rem;margin-bottom:20px;}
-  .charts{display:flex;gap:16px;margin-bottom:22px;flex-wrap:wrap;}
-  .charts img{max-width:47%;border:1px solid #dde1e6;border-radius:8px;}
-  table{width:100%;border-collapse:collapse;font-size:.82rem;}
-  th,td{padding:6px 8px;border-bottom:1px solid #dde1e6;text-align:left;}
-  th{color:#667085;font-size:.75rem;text-transform:uppercase;}
-  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
-  tr.total td{font-weight:700;border-top:2px solid #1f2430;border-bottom:none;}
-  tr.sub td{color:#667085;}
-  tr.sub td:first-child{padding-left:22px;}
-  tr.detail-row{display:table-row !important;}
-  tr.detail-row td{padding:0;}
-  tr.detail-row table{margin:2px 0 8px;}
-  .caret{display:none;}
-  h2.secao{font-size:.95rem;margin:26px 0 8px;padding-top:14px;border-top:1px solid #dde1e6;}
-  img.grafico-diario{max-width:100%;border:1px solid #dde1e6;border-radius:8px;margin-bottom:16px;}
-  @media print{ body{margin:10mm;} h2.secao{break-before:auto;} }
+  ${CSS_EXPORT_BASE}
 </style>
 </head><body>
-<h1>Apuração de Arrecadação Contábil — Ano ${escapeHTML(String(ano))}</h1>
-<div class="sub">${escapeHTML(info.nomeArquivo || '')} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
-<div class="charts">
-  ${imgPizza ? `<img src="${imgPizza}" alt="Arrecadado por tributo">` : ''}
-  ${imgLinha ? `<img src="${imgLinha}" alt="Arrecadação diária">` : ''}
+<div class="cabecalho">
+  <h1>Apuração de Arrecadação Contábil</h1>
+  <div class="selo">Ano ${escapeHTML(String(ano))}</div>
 </div>
+<div class="sub">${escapeHTML(info.nomeArquivo || '')} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
+<div class="total-destaque"><span>Total geral do ano</span><strong>R$ ${fmtBRL(r.totalGeral)}</strong></div>
+<div class="charts">
+  <div class="chart-card">
+    <h3>Arrecadado por tributo</h3>
+    ${imgPizza ? `<img src="${imgPizza}" alt="Arrecadado por tributo">` : ''}
+  </div>
+  <div class="chart-card">
+    <h3>Arrecadação diária</h3>
+    ${imgLinha ? `<img src="${imgLinha}" alt="Arrecadação diária">` : ''}
+  </div>
+</div>
+<h2 class="secao secao-inicial">Resumo por tributo</h2>
 <table>${tabelaHTML}</table>
 <h2 class="secao">Movimentação diária</h2>
-${imgDiario ? `<img class="grafico-diario" src="${imgDiario}" alt="Movimentação diária por tributo">` : ''}
+${imgDiario ? `<div class="chart-card chart-full"><img class="grafico-diario" src="${imgDiario}" alt="Movimentação diária por tributo"></div>` : ''}
 <table>${tabelaDiariaHTML}</table>
+<div class="rodape">Apuração de Arrecadação Contábil — gerado automaticamente, 100% no navegador.</div>
 </body></html>`);
   janela.document.close();
   janela.focus();
@@ -450,21 +496,26 @@ function construirTabelaDiariaHTML(r, idPrefix) {
     return new Date(yb, mb - 1, db) - new Date(ya, ma - 1, da);
   });
   if (!linhas.length) return `<tr><td class="hint" style="padding:8px 0;">Nenhuma data registrada ainda.</td></tr>`;
-  let html = `<tr><th></th><th>Data</th><th class="num">Arrecadado no dia (R$)</th></tr>`;
+  let corpo = '';
   linhas.forEach(([data, v], i) => {
     const porTrib = r.porDataTributo.get(data);
     const temDetalhe = porTrib && porTrib.size;
-    html += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(data)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
+    // Cada data (+ o detalhamento dela) fica no seu próprio <tbody> — no PDF exportado isso evita
+    // que a impressão corte a linha bem no meio (ex.: "10/09/2026" virando "1" numa página e
+    // "0/09/2026" na seguinte), que é o que acontecia quando tudo era um <tr> solto na mesma tabela.
+    corpo += `<tbody class="grupo-data">`;
+    corpo += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(data)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
     if (temDetalhe) {
       const subLinhas = [...porTrib.entries()].sort((a, b) => b[1] - a[1]);
-      html += `<tr class="detail-row" id="detail-${idPrefix}-${i}" style="display:none;"><td></td><td colspan="2">
+      corpo += `<tr class="detail-row" id="detail-${idPrefix}-${i}" style="display:none;"><td></td><td colspan="2">
         <table>
           ${subLinhas.map(([t, tv]) => `<tr class="sub"><td>${escapeHTML(t)}</td><td class="num">${fmtBRL(tv)}</td></tr>`).join('')}
         </table>
       </td></tr>`;
     }
+    corpo += `</tbody>`;
   });
-  return html;
+  return `<thead><tr><th></th><th>Data</th><th class="num">Arrecadado no dia (R$)</th></tr></thead>${corpo}`;
 }
 
 btnSalvarAno.addEventListener('click', () => {
@@ -842,34 +893,74 @@ function renderizarVariacao(anosMarcados, somaPorAnoTributo, tributos) {
   destaquesVariacaoEl.innerHTML = destaquesHTML;
 
   // ── Tabela: valor de cada tributo em cada ano marcado + variação ano a ano ──
-  let html = `<tr><th>Tributo</th>`;
+  let cabecalho = `<tr><th>Tributo</th>`;
   anosOrdenados.forEach((ano, i) => {
-    html += `<th class="num-var">${escapeHTML(ano)}</th>`;
-    if (i > 0) html += `<th class="num-var">Var. ${escapeHTML(anosOrdenados[i - 1])} → ${escapeHTML(ano)}</th>`;
+    cabecalho += `<th class="num-var">${escapeHTML(ano)}</th>`;
+    if (i > 0) cabecalho += `<th class="num-var">Var. ${escapeHTML(anosOrdenados[i - 1])} → ${escapeHTML(ano)}</th>`;
   });
-  html += `</tr>`;
+  cabecalho += `</tr>`;
 
+  let corpo = '';
   tributos.forEach(t => {
-    html += `<tr><td>${escapeHTML(t)}</td>`;
+    corpo += `<tr><td>${escapeHTML(t)}</td>`;
     anosOrdenados.forEach((ano, i) => {
       const v = somaPorAnoTributo[ano]?.[t] || 0;
-      html += `<td class="num-var">R$ ${fmtBRL(v)}</td>`;
+      corpo += `<td class="num-var">R$ ${fmtBRL(v)}</td>`;
       if (i > 0) {
         const vAnt = somaPorAnoTributo[anosOrdenados[i - 1]]?.[t] || 0;
-        html += `<td class="num-var">${fmtVariacaoHTML(vAnt, v)}</td>`;
+        corpo += `<td class="num-var">${fmtVariacaoHTML(vAnt, v)}</td>`;
       }
     });
-    html += `</tr>`;
+    corpo += `</tr>`;
   });
 
-  html += `<tr class="total"><td>TOTAL GERAL</td>`;
+  corpo += `<tr class="total"><td>TOTAL GERAL</td>`;
   anosOrdenados.forEach((ano, i) => {
-    html += `<td class="num-var">R$ ${fmtBRL(totalPorAno[ano])}</td>`;
-    if (i > 0) html += `<td class="num-var">${fmtVariacaoHTML(totalPorAno[anosOrdenados[i - 1]], totalPorAno[ano])}</td>`;
+    corpo += `<td class="num-var">R$ ${fmtBRL(totalPorAno[ano])}</td>`;
+    if (i > 0) corpo += `<td class="num-var">${fmtVariacaoHTML(totalPorAno[anosOrdenados[i - 1]], totalPorAno[ano])}</td>`;
   });
-  html += `</tr>`;
+  corpo += `</tr>`;
 
-  tabVariacaoEl.innerHTML = html;
+  tabVariacaoEl.innerHTML = `<thead>${cabecalho}</thead><tbody>${corpo}</tbody>`;
+}
+
+// Gera a imagem do gráfico comparativo numa resolução maior e com fontes maiores só pra exportação,
+// reaproveitando os mesmos rótulos/dados/cores do gráfico já desenhado na tela — o canvas da tela
+// (pensado pro espaço de um painel na página) ficava com os nomes de tributo rotacionados colidindo
+// uns nos outros quando reaproveitado direto no PDF; aqui, com mais largura e fonte maior, param de
+// se sobrepor.
+function gerarImagemGraficoComparativo() {
+  if (!chartComparativo) return '';
+  const canvas = document.createElement('canvas');
+  canvas.width = 1000;
+  canvas.height = 380;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  document.body.appendChild(canvas);
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: chartComparativo.data.labels,
+      datasets: chartComparativo.data.datasets.map(d => ({ label: d.label, data: d.data, backgroundColor: d.backgroundColor })),
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+      },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 60, minRotation: 30 } },
+        y: { ticks: { font: { size: 10 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+      },
+    },
+  });
+
+  const imagem = canvas.toDataURL('image/png');
+  chart.destroy();
+  canvas.remove();
+  return imagem;
 }
 
 // Mesma ideia do "Exportar PDF" de cada ano, mas pro painel de comparativo inteiro: gráfico de
@@ -882,7 +973,7 @@ btnExportarComparativoPDF.addEventListener('click', () => {
     return;
   }
 
-  const imgComparativo = chartComparativo ? document.getElementById('chartComparativo').toDataURL('image/png') : '';
+  const imgComparativo = gerarImagemGraficoComparativo();
 
   const janela = window.open('', '_blank');
   if (!janela) {
@@ -890,34 +981,26 @@ btnExportarComparativoPDF.addEventListener('click', () => {
     return;
   }
   janela.document.write(`<!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="UTF-8"><title>Comparativo entre anos</title>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Comparativo ${escapeHTML(anosMarcados.join(' x '))}</title>
 <style>
-  body{font-family:Segoe UI,Arial,sans-serif;color:#1f2430;margin:28px;}
-  h1{font-size:1.25rem;margin:0 0 2px;}
-  .sub{color:#667085;font-size:.85rem;margin-bottom:20px;}
-  img.grafico{max-width:100%;border:1px solid #dde1e6;border-radius:8px;margin-bottom:20px;}
-  .destaques-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:22px;}
-  .destaque-card{border:1px solid #dde1e6;border-radius:8px;padding:10px 12px;}
-  .destaque-card.subiu{border-left:4px solid #1e7d4d;}
-  .destaque-card.desceu{border-left:4px solid #b6531c;}
-  .destaque-card .label{font-size:.72rem;color:#667085;text-transform:uppercase;margin-bottom:3px;}
-  .destaque-card .valor{font-weight:700;}
-  .variacao-pos{color:#1e7d4d;font-weight:600;}
-  .variacao-neg{color:#b6531c;font-weight:600;}
-  .variacao-zero{color:#667085;}
-  table{width:100%;border-collapse:collapse;font-size:.8rem;}
-  th,td{padding:6px 8px;border-bottom:1px solid #dde1e6;text-align:right;white-space:nowrap;}
-  th:first-child,td:first-child{text-align:left;}
-  th{color:#667085;font-size:.72rem;text-transform:uppercase;}
-  tr.total td{font-weight:700;border-top:2px solid #1f2430;}
-  @media print{ body{margin:10mm;} }
+  ${CSS_EXPORT_BASE}
+  .num-var{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  th.num-var{text-align:right;}
 </style>
 </head><body>
-<h1>Comparativo entre anos — ${escapeHTML(anosMarcados.join(', '))}</h1>
+<div class="cabecalho">
+  <h1>Comparativo entre anos</h1>
+  <div class="selo">${escapeHTML(anosMarcados.join(' × '))}</div>
+</div>
 <div class="sub">${escapeHTML(periodoComparadoEl.textContent)} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
-${imgComparativo ? `<img class="grafico" src="${imgComparativo}" alt="Gráfico comparativo">` : ''}
+<div class="chart-card chart-full">
+  <h3>Arrecadado por tributo, ano a ano</h3>
+  ${imgComparativo ? `<img src="${imgComparativo}" alt="Gráfico comparativo">` : ''}
+</div>
 ${destaquesVariacaoEl.innerHTML}
-<div style="margin-top:20px;">${tabVariacaoEl.outerHTML}</div>
+<h2 class="secao secao-inicial">Variação por tributo</h2>
+<table>${tabVariacaoEl.innerHTML}</table>
+<div class="rodape">Apuração de Arrecadação Contábil — gerado automaticamente, 100% no navegador.</div>
 </body></html>`);
   janela.document.close();
   janela.focus();
@@ -1271,22 +1354,24 @@ function fmtBRL(v) {
 // ids das linhas de detalhe não colidam quando há vários cards (um por ano) na mesma página.
 function construirTabelaResumoHTML(r, idPrefix) {
   const linhas = [...r.porTributo.entries()].sort((a, b) => b[1] - a[1]);
-  let html = `<tr><th></th><th>Tipo de tributo</th><th class="num">Valor arrecadado (R$)</th></tr>`;
+  let corpo = '';
   linhas.forEach(([nome, v], i) => {
     const sub = r.porSub.get(nome);
     const temDetalhe = sub && sub.size;
-    html += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(nome)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
+    corpo += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(nome)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
     if (temDetalhe) {
       const linhasSub = [...sub.entries()].sort((a, b) => b[1] - a[1]);
-      html += `<tr class="detail-row" id="detail-${idPrefix}-${i}" style="display:none;"><td></td><td colspan="2">
+      corpo += `<tr class="detail-row" id="detail-${idPrefix}-${i}" style="display:none;"><td></td><td colspan="2">
         <table>
           ${linhasSub.map(([sn, sv]) => `<tr class="sub"><td>${escapeHTML(sn)}</td><td class="num">${fmtBRL(sv)}</td></tr>`).join('')}
         </table>
       </td></tr>`;
     }
   });
-  html += `<tr class="total"><td></td><td>TOTAL GERAL</td><td class="num">${fmtBRL(r.totalGeral)}</td></tr>`;
-  return html;
+  corpo += `<tr class="total"><td></td><td>TOTAL GERAL</td><td class="num">${fmtBRL(r.totalGeral)}</td></tr>`;
+  // <thead> repete o cabeçalho em toda página impressa (útil pra tabelas longas no PDF exportado);
+  // não muda nada na tela, só melhora a impressão.
+  return `<thead><tr><th></th><th>Tipo de tributo</th><th class="num">Valor arrecadado (R$)</th></tr></thead><tbody>${corpo}</tbody>`;
 }
 
 function vincularCliquesTabela(tabEl, idPrefix) {
