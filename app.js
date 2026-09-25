@@ -34,6 +34,7 @@ let lastResult = null;
 const graficosPorSufixo = {};
 let chartComparativo = null;
 const movDiariaAbertos = new Set(); // anos com a seção "Movimentação diária" expandida (sobrevive a re-renders)
+const movDiariaView = new Map(); // ano (string) -> 'grafico' | 'lista' — visão atual da Movimentação diária (sobrevive a re-renders)
 const CORES_GRAFICO = ['#2f5d8a', '#4f8fc0', '#7fb069', '#e0a458', '#c15b4a', '#8e6bab', '#4a9d8f', '#c98686', '#9aa5b1'];
 const anosCarregadosEl = document.getElementById('anosCarregados');
 
@@ -615,6 +616,22 @@ ${imgDiario ? `<div class="chart-card chart-full"><img class="grafico-diario" sr
   setTimeout(() => { try { janela.print(); } catch (e) { /* usuário pode imprimir manualmente */ } }, 400);
 }
 
+// Resumo rápido (dias lançados, total do período, média diária, maior arrecadação) exibido acima
+// do gráfico/lista da "Movimentação diária" — puramente derivado de `porData`, não recalcula nada.
+function construirStatsDiariaHTML(linhasData) {
+  if (!linhasData.length) return '';
+  const total = linhasData.reduce((s, [, v]) => s + v, 0);
+  const media = total / linhasData.length;
+  const maior = linhasData.reduce((m, l) => (l[1] > m[1] ? l : m), linhasData[0]);
+  return `
+    <div class="mov-diaria-stats">
+      <div class="mov-stat"><span class="mov-stat-label">Dias lançados</span><span class="mov-stat-valor">${linhasData.length}</span></div>
+      <div class="mov-stat"><span class="mov-stat-label">Total do período</span><span class="mov-stat-valor">R$ ${fmtBRL(total)}</span></div>
+      <div class="mov-stat"><span class="mov-stat-label">Média diária</span><span class="mov-stat-valor">R$ ${fmtBRL(media)}</span></div>
+      <div class="mov-stat"><span class="mov-stat-label">Maior arrecadação</span><span class="mov-stat-valor">R$ ${fmtBRL(maior[1])}<br><span class="mov-stat-sub">${escapeHTML(maior[0])}</span></span></div>
+    </div>`;
+}
+
 // Tabela de "Movimentação diária": uma linha por data (mais recente primeiro), clicável pra abrir
 // o detalhamento por tributo daquele dia — reaproveita o mesmo acordeão (classes/IDs) do resumo geral.
 function construirTabelaDiariaHTML(r, idPrefix) {
@@ -631,7 +648,7 @@ function construirTabelaDiariaHTML(r, idPrefix) {
     // que a impressão corte a linha bem no meio (ex.: "10/09/2026" virando "1" numa página e
     // "0/09/2026" na seguinte), que é o que acontecia quando tudo era um <tr> solto na mesma tabela.
     corpo += `<tbody class="grupo-data">`;
-    corpo += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(data)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
+    corpo += `<tr class="tributo-row" data-idx="${i}" data-data="${escapeHTML(data)}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(data)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
     if (temDetalhe) {
       const subLinhas = [...porTrib.entries()].sort((a, b) => b[1] - a[1]);
       corpo += `<tr class="detail-row" id="detail-${idPrefix}-${i}" style="display:none;"><td></td><td colspan="2">
@@ -673,6 +690,7 @@ function renderizarCardsAnos() {
       const refs = graficosPorSufixo[sufixo];
       if (refs.pizza) refs.pizza.destroy();
       if (refs.linha) refs.linha.destroy();
+      if (refs.diario) refs.diario.destroy();
       delete graficosPorSufixo[sufixo];
     }
   }
@@ -710,8 +728,19 @@ function renderizarCardsAnos() {
             <button class="secondary btn-mov-pdf" data-ano="${ano}" type="button">Escolher PDF e somar a este ano</button>
             <span class="mov-pdf-status hint" style="display:block;margin-top:6px;"></span>
           </div>
-          <p class="hint" style="margin-top:8px;">Clique numa data pra ver o detalhamento por tributo. Lance aqui a arrecadação do fechamento do dia.</p>
-          <table id="tabDiaria-${ano}"></table>
+          <div id="mov-diaria-stats-${ano}"></div>
+          <div class="mov-diaria-viewtoggle" role="group" aria-label="Visualização da movimentação diária">
+            <button type="button" class="mov-diaria-view-btn" data-ano="${ano}" data-modo="grafico">📊 Gráfico</button>
+            <button type="button" class="mov-diaria-view-btn" data-ano="${ano}" data-modo="lista">📋 Lista</button>
+          </div>
+          <p class="hint" style="margin:0 0 8px;">Passe o mouse numa barra pra ver o detalhamento por tributo daquele dia, ou clique nela pra abrir a linha correspondente na lista. Lance aqui a arrecadação do fechamento do dia.</p>
+          <div class="mov-diaria-chart-wrap" id="mov-diaria-chart-wrap-${ano}">
+            <canvas id="chartDiario-${ano}"></canvas>
+            <p class="mov-diaria-empty" id="mov-diaria-empty-${ano}" style="display:none;">Nenhuma data registrada ainda — lance o primeiro fechamento abaixo ou suba um PDF.</p>
+          </div>
+          <div class="mov-diaria-tabela-wrap" id="mov-diaria-tabela-wrap-${ano}" style="display:none;">
+            <table id="tabDiaria-${ano}"></table>
+          </div>
           <div class="row mov-form" style="margin-top:12px;">
             <input type="date" class="mov-data" aria-label="Data do lançamento">
             <input type="text" class="mov-tributo" list="dl-tributos-${ano}" placeholder="Tipo de tributo (ex.: ISSQN)">
@@ -742,6 +771,13 @@ function renderizarCardsAnos() {
     const tabDiariaEl = document.getElementById(`tabDiaria-${ano}`);
     tabDiariaEl.innerHTML = construirTabelaDiariaHTML(r, `dia${ano}`);
     vincularCliquesTabela(tabDiariaEl, `dia${ano}`);
+
+    const linhasDiarias = [...r.porData.entries()].sort((a, b) => {
+      const [da, ma, ya] = a[0].split('/'); const [db, mb, yb] = b[0].split('/');
+      return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
+    });
+    document.getElementById(`mov-diaria-stats-${ano}`).innerHTML = construirStatsDiariaHTML(linhasDiarias);
+    renderizarGraficoDiario(r, ano, document.getElementById(`chartDiario-${ano}`));
 
     const dl = document.getElementById(`dl-tributos-${ano}`);
     dl.innerHTML = [...r.porTributo.keys()].sort().map(t => `<option value="${escapeHTML(t)}">`).join('');
@@ -777,6 +813,16 @@ function renderizarCardsAnos() {
     handleAdicionarMovimento(ano);
   }));
 
+  // Alterna entre a visão "Gráfico" (padrão, ao abrir) e "Lista" dentro de cada card de ano.
+  anosCarregadosEl.querySelectorAll('.mov-diaria-view-btn').forEach(btn => {
+    const ano = btn.getAttribute('data-ano');
+    btn.addEventListener('click', () => {
+      movDiariaView.set(ano, btn.getAttribute('data-modo'));
+      aplicarViewDiaria(ano);
+    });
+  });
+  anos.forEach(ano => aplicarViewDiaria(ano));
+
   // Seção "Movimentação diária": fechada por padrão, alterna ao clicar no cabeçalho — o estado
   // (aberto/fechado) fica em `movDiariaAbertos` pra sobreviver aos re-renders do card inteiro.
   anosCarregadosEl.querySelectorAll('.mov-diaria-toggle').forEach(btn => {
@@ -786,11 +832,12 @@ function renderizarCardsAnos() {
     const aberto = movDiariaAbertos.has(ano);
     body.style.display = aberto ? '' : 'none';
     caret.classList.toggle('open', aberto);
+    if (aberto) aplicarViewDiaria(ano);
     btn.addEventListener('click', () => {
       const abrirAgora = body.style.display === 'none';
       body.style.display = abrirAgora ? '' : 'none';
       caret.classList.toggle('open', abrirAgora);
-      if (abrirAgora) movDiariaAbertos.add(ano); else movDiariaAbertos.delete(ano);
+      if (abrirAgora) { movDiariaAbertos.add(ano); aplicarViewDiaria(ano); } else movDiariaAbertos.delete(ano);
     });
   });
 }
@@ -1647,6 +1694,109 @@ function renderizarGraficos(r, sufixo, canvasPizza, canvasLinha) {
       },
     },
   });
+}
+
+// Gráfico de barras empilhadas (interativo, ao vivo na tela) da seção "Movimentação diária" —
+// mesma decomposição por tributo do gráfico gerado pro PDF exportado (`gerarImagemGraficoDiario`),
+// só que aqui reage a hover/clique. Reaproveita o tooltip detalhado da "Arrecadação diária" (mesma
+// função, mesmas cores por tributo) e, ao clicar numa barra, abre a linha correspondente na lista.
+function renderizarGraficoDiario(r, ano, canvas) {
+  const sufixo = `-${ano}`;
+  if (!graficosPorSufixo[sufixo]) graficosPorSufixo[sufixo] = { pizza: null, linha: null, diario: null };
+  const refs = graficosPorSufixo[sufixo];
+
+  if (refs.diario) { refs.diario.destroy(); refs.diario = null; }
+
+  const linhasData = [...r.porData.entries()].sort((a, b) => {
+    const [da, ma, ya] = a[0].split('/'); const [db, mb, yb] = b[0].split('/');
+    return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
+  });
+  const vazio = document.getElementById(`mov-diaria-empty-${ano}`);
+
+  if (!linhasData.length) {
+    if (canvas) canvas.style.display = 'none';
+    if (vazio) vazio.style.display = '';
+    return;
+  }
+  if (canvas) canvas.style.display = '';
+  if (vazio) vazio.style.display = 'none';
+  if (!canvas) return;
+
+  const valoresDiarios = linhasData.map(([, v]) => v);
+  const linhasPizza = [...r.porTributo.entries()].sort((a, b) => b[1] - a[1]);
+  const corPorTributo = new Map(linhasPizza.map(([nome], i) => [nome, CORES_GRAFICO[i % CORES_GRAFICO.length]]));
+
+  refs.diario = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: linhasData.map(([data]) => data),
+      datasets: linhasPizza.map(([nome]) => ({
+        label: nome,
+        data: linhasData.map(([data]) => r.porDataTributo.get(data)?.get(nome) || 0),
+        backgroundColor: corPorTributo.get(nome),
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      interaction: { mode: 'index', intersect: false },
+      onClick: (evt, _els, chart) => {
+        const pontos = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
+        if (!pontos.length) return;
+        abrirDetalheDataNaLista(ano, chart.data.labels[pontos[0].index]);
+      },
+      onHover: (evt, _els, chart) => {
+        evt.native.target.style.cursor = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, true).length ? 'pointer' : 'default';
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          enabled: false,
+          external: (ctx) => tooltipDiarioHTML(ctx, r, valoresDiarios, corPorTributo),
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { maxRotation: 70, minRotation: 45, autoSkip: true, font: { size: 10 } } },
+        y: { stacked: true, ticks: { callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+      },
+    },
+  });
+}
+
+// Alterna entre a visão "Gráfico" e "Lista" da Movimentação diária de um ano, mantendo o estado
+// em `movDiariaView` (sobrevive a re-renders) — e força o Chart.js a recalcular o tamanho, já que
+// ele pode ter nascido com o card ainda fechado (canvas com largura zero nesse instante).
+function aplicarViewDiaria(ano) {
+  ano = String(ano);
+  const modo = movDiariaView.get(ano) || 'grafico';
+  const chartWrap = document.getElementById(`mov-diaria-chart-wrap-${ano}`);
+  const tabelaWrap = document.getElementById(`mov-diaria-tabela-wrap-${ano}`);
+  if (chartWrap) chartWrap.style.display = modo === 'grafico' ? '' : 'none';
+  if (tabelaWrap) tabelaWrap.style.display = modo === 'lista' ? '' : 'none';
+  document.querySelectorAll(`.mov-diaria-view-btn[data-ano="${ano}"]`).forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-modo') === modo);
+  });
+  if (modo === 'grafico') {
+    const refs = graficosPorSufixo[`-${ano}`];
+    if (refs && refs.diario) requestAnimationFrame(() => refs.diario.resize());
+  }
+}
+
+// Clique numa barra do gráfico da Movimentação diária: muda pra visão "Lista", abre o
+// detalhamento daquela data (mesmo acordeão da tabela) e dá um destaque visual na linha.
+function abrirDetalheDataNaLista(ano, data) {
+  ano = String(ano);
+  movDiariaView.set(ano, 'lista');
+  aplicarViewDiaria(ano);
+  const tabEl = document.getElementById(`tabDiaria-${ano}`);
+  if (!tabEl) return;
+  const tr = tabEl.querySelector(`tr.tributo-row[data-data="${CSS.escape(data)}"]`);
+  if (!tr) return;
+  if (!tr.classList.contains('open')) tr.click();
+  tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  tr.classList.add('mov-flash');
+  setTimeout(() => tr.classList.remove('mov-flash'), 1200);
 }
 
 // Tooltip HTML customizado do gráfico de arrecadação diária: mostra o total do dia e o
