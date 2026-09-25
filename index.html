@@ -170,10 +170,21 @@
       Comparar só o período (dia/mês) em comum entre os anos — evita comparar 3 meses de um ano com o ano inteiro do outro. Desmarque pra comparar o total de cada ano inteiro (mesmo total dos cards acima).
     </label>
     <p id="periodoComparado" class="hint"></p>
-    <div class="chart-canvas-wrap" style="height:320px;"><canvas id="chartComparativo"></canvas></div>
-    <div id="destaquesVariacao"></div>
-    <div class="tabela-scroll">
-      <table id="tabVariacao" class="tab-compacta" style="margin-top:14px;"></table>
+    <div class="mov-diaria-viewtoggle" role="group" aria-label="Tipo de comparação">
+      <button type="button" class="mov-diaria-view-btn comp-aba-btn active" data-aba="tributo">Por tributo</button>
+      <button type="button" class="mov-diaria-view-btn comp-aba-btn" data-aba="diaria">Movimentação diária</button>
+    </div>
+    <div id="comp-aba-tributo">
+      <div class="chart-canvas-wrap" style="height:320px;"><canvas id="chartComparativo"></canvas></div>
+      <div id="destaquesVariacao"></div>
+      <div class="tabela-scroll">
+        <table id="tabVariacao" class="tab-compacta" style="margin-top:14px;"></table>
+      </div>
+    </div>
+    <div id="comp-aba-diaria" style="display:none;">
+      <p class="hint" style="margin-top:0;">Sobrepõe a arrecadação de cada dia (alinhada por dia/mês) dos anos marcados, pra comparar o ritmo de arrecadação entre eles.</p>
+      <div class="chart-canvas-wrap" style="height:340px;"><canvas id="chartComparativoDiario"></canvas></div>
+      <p class="mov-diaria-empty" id="comparativoDiarioVazio" style="display:none;">Nenhuma data lançada nos anos marcados (nesse período).</p>
     </div>
   </div>
 </main>
