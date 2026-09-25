@@ -1250,9 +1250,50 @@ function gerarImagemGraficoComparativo() {
   return imagem;
 }
 
-// Mesma ideia do "Exportar PDF" de cada ano, mas pro painel de comparativo inteiro: gráfico de
-// barras + destaques (maior crescimento/queda) + tabela de variação ano a ano, numa janela de
-// impressão pra salvar como PDF pelo navegador.
+// Mesma ideia da função acima, só que pro gráfico de linha da aba "Movimentação diária" do
+// comparativo — reaproveita os labels/datasets já calculados em `chartComparativoDiario`, que
+// existe independente de qual aba está ativa na tela (as duas são sempre recalculadas juntas).
+function gerarImagemGraficoComparativoDiario() {
+  if (!chartComparativoDiario) return '';
+  const canvas = document.createElement('canvas');
+  canvas.width = 1300;
+  canvas.height = 500;
+  canvas.style.position = 'fixed';
+  canvas.style.left = '-9999px';
+  document.body.appendChild(canvas);
+
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: chartComparativoDiario.data.labels,
+      datasets: chartComparativoDiario.data.datasets.map(d => ({
+        label: d.label, data: d.data, borderColor: d.borderColor, backgroundColor: d.backgroundColor,
+        spanGaps: false, pointRadius: 2, tension: 0.15,
+      })),
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 } } },
+      },
+      scales: {
+        x: { ticks: { font: { size: 11 }, maxRotation: 70, minRotation: 45, autoSkip: true } },
+        y: { ticks: { font: { size: 12 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+      },
+    },
+  });
+
+  const imagem = canvas.toDataURL('image/png');
+  chart.destroy();
+  canvas.remove();
+  return imagem;
+}
+
+// Mesma ideia do "Exportar PDF" de cada ano, mas pro painel de comparativo inteiro: os dois
+// gráficos (por tributo + movimentação diária, independente de qual aba está aberta na tela) +
+// destaques (maior crescimento/queda) + tabela de variação ano a ano, numa janela de impressão
+// pra salvar como PDF pelo navegador.
 btnExportarComparativoPDF.addEventListener('click', () => {
   const anosMarcados = [...anosSalvosLista.querySelectorAll('.chk-ano:checked')].map(el => el.value);
   if (anosMarcados.length < 2) {
@@ -1261,6 +1302,7 @@ btnExportarComparativoPDF.addEventListener('click', () => {
   }
 
   const imgComparativo = gerarImagemGraficoComparativo();
+  const imgComparativoDiario = gerarImagemGraficoComparativoDiario();
 
   const janela = window.open('', '_blank');
   if (!janela) {
@@ -1280,9 +1322,15 @@ btnExportarComparativoPDF.addEventListener('click', () => {
   <div class="selo">${escapeHTML(anosMarcados.join(' × '))}</div>
 </div>
 <div class="sub">${escapeHTML(periodoComparadoEl.textContent)} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
-<div class="chart-card chart-full">
-  <h3>Arrecadado por tributo, ano a ano</h3>
-  ${imgComparativo ? `<img src="${imgComparativo}" alt="Gráfico comparativo">` : ''}
+<div class="charts">
+  <div class="chart-card">
+    <h3>Arrecadado por tributo, ano a ano</h3>
+    ${imgComparativo ? `<img src="${imgComparativo}" alt="Gráfico comparativo por tributo">` : ''}
+  </div>
+  <div class="chart-card">
+    <h3>Movimentação diária, ano a ano</h3>
+    ${imgComparativoDiario ? `<img src="${imgComparativoDiario}" alt="Gráfico comparativo de movimentação diária">` : '<p class="hint">Sem dados de movimentação diária em comum entre os anos marcados.</p>'}
+  </div>
 </div>
 ${destaquesVariacaoEl.innerHTML}
 <h2 class="secao secao-inicial">Variação por tributo</h2>
