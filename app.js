@@ -1235,11 +1235,13 @@ function gerarImagemGraficoComparativo() {
       responsive: false,
       animation: false,
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 } } },
+        // Legenda em preto (em vez do cinza padrão do Chart.js) — no PDF exportado, impresso ou
+        // em tela, fica bem mais legível que o cinza claro usado nos gráficos interativos da tela.
+        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 }, color: '#000' } },
       },
       scales: {
-        x: { ticks: { font: { size: 12 }, maxRotation: 60, minRotation: 30 } },
-        y: { ticks: { font: { size: 12 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+        x: { ticks: { font: { size: 12 }, maxRotation: 60, minRotation: 30, color: '#000' } },
+        y: { ticks: { font: { size: 12 }, color: '#000', callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
       },
     },
   });
@@ -1275,11 +1277,11 @@ function gerarImagemGraficoComparativoDiario() {
       responsive: false,
       animation: false,
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 } } },
+        legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 13 }, color: '#000' } },
       },
       scales: {
-        x: { ticks: { font: { size: 11 }, maxRotation: 70, minRotation: 45, autoSkip: true } },
-        y: { ticks: { font: { size: 12 }, callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+        x: { ticks: { font: { size: 11 }, maxRotation: 70, minRotation: 45, autoSkip: true, color: '#000' } },
+        y: { ticks: { font: { size: 12 }, color: '#000', callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
       },
     },
   });
