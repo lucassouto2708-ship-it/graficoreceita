@@ -587,17 +587,88 @@ function gerarImagemGraficoDiario(r) {
   return imagem;
 }
 
+// Lê o seletor de período (+ campos "De"/"Até" quando for "Personalizado") do card daquele ano e
+// devolve a janela de datas pra filtrar a exportação. `null` quando o período é inválido (datas
+// faltando ou invertidas) — quem chama deve avisar o usuário e não abrir o PDF nesse caso.
+function lerPeriodoExportacao(ano) {
+  const sel = document.querySelector(`.periodo-exportar[data-ano="${ano}"]`);
+  const modo = sel ? sel.value : 'todo';
+  if (modo === 'todo') return { modo, rotulo: 'Período inteiro' };
+
+  if (modo === 'custom') {
+    const deEl = document.querySelector(`.periodo-de[data-ano="${ano}"]`);
+    const ateEl = document.querySelector(`.periodo-ate[data-ano="${ano}"]`);
+    if (!deEl?.value || !ateEl?.value) return null;
+    const [dy, dm, dd] = deEl.value.split('-').map(Number);
+    const [ay, am, ad] = ateEl.value.split('-').map(Number);
+    const de = new Date(dy, dm - 1, dd);
+    const ate = new Date(ay, am - 1, ad);
+    if (de > ate) return null;
+    return { modo, de, ate, rotulo: `${deEl.value.split('-').reverse().join('/')} a ${ateEl.value.split('-').reverse().join('/')}` };
+  }
+
+  return { modo, n: Number(modo), rotulo: `Últimos ${modo} dias` };
+}
+
+// Filtra `porData`/`porDataTributo` pela janela escolhida e recalcula `porTributo`/`totalGeral` só
+// com o que sobrou — esses dois batem certinho com o período filtrado porque vêm da mesma soma.
+// `porSub` (Dívida Ativa, Corrente etc.) NÃO tem data associada no PDF original, só o total do ano
+// inteiro — não dá pra saber quanto de cada sub-item caiu dentro do período escolhido, então o
+// detalhamento por sub-item fica de fora da exportação filtrada (evita mostrar um número que não
+// bate com o total do período, ou pior, parecer que bate sem bater).
+function filtrarResultadoPorPeriodo(r, janela) {
+  if (!janela || janela.modo === 'todo') return r;
+
+  const datasOrdenadas = [...r.porData.keys()]
+    .map(str => { const [dd, mm, yy] = str.split('/').map(Number); return { str, data: new Date(yy, mm - 1, dd) }; })
+    .sort((a, b) => a.data - b.data);
+
+  let de, ate;
+  if (janela.modo === 'custom') {
+    de = janela.de; ate = janela.ate;
+  } else if (datasOrdenadas.length) {
+    ate = datasOrdenadas[datasOrdenadas.length - 1].data;
+    de = new Date(ate); de.setDate(de.getDate() - (janela.n - 1));
+  } else {
+    de = new Date(8640000000000000); ate = new Date(-8640000000000000); // nenhuma data cabe
+  }
+
+  const porData = new Map(), porDataTributo = new Map(), porTributo = new Map();
+  for (const { str, data } of datasOrdenadas) {
+    if (data < de || data > ate) continue;
+    porData.set(str, r.porData.get(str));
+    const mapaTrib = r.porDataTributo.get(str);
+    if (!mapaTrib) continue;
+    porDataTributo.set(str, mapaTrib);
+    for (const [nome, valor] of mapaTrib.entries()) porTributo.set(nome, (porTributo.get(nome) || 0) + valor);
+  }
+  const totalGeral = [...porTributo.values()].reduce((s, v) => s + v, 0);
+  return { porTributo, porSub: new Map(), porData, porDataTributo, totalGeral };
+}
+
 function exportarAnoPDF(ano) {
   const todos = carregarAnosSalvos();
   const info = todos[ano];
   if (!info) return;
-  const r = {
+  const rCompleto = {
     porTributo: objParaMap(info.porTributo, 1),
     porSub: objParaMap(info.porSub, 2),
     porData: objParaMap(info.porData, 1),
     porDataTributo: objParaMap(info.porDataTributo, 2),
     totalGeral: info.totalGeral,
   };
+
+  const periodo = lerPeriodoExportacao(ano);
+  if (!periodo) {
+    alert('Escolha um período "De" e "Até" válido (a data inicial não pode ser depois da final) pra exportar.');
+    return;
+  }
+  const r = filtrarResultadoPorPeriodo(rCompleto, periodo);
+  if (periodo.modo !== 'todo' && !r.porData.size) {
+    alert(`Nenhum lançamento de ${ano} caiu no período selecionado (${periodo.rotulo}).`);
+    return;
+  }
+
   const tabelaHTML = construirTabelaResumoHTML(r, `pdf${ano}`);
   const tabelaDiariaHTML = construirTabelaDiariaHTML(r, `pdfdia${ano}`);
   const imgPizza = gerarImagemGraficoPizza(r);
@@ -619,8 +690,9 @@ function exportarAnoPDF(ano) {
   <h1>Apuração de Arrecadação Contábil</h1>
   <div class="selo">Ano ${escapeHTML(String(ano))}</div>
 </div>
-<div class="sub">${escapeHTML(info.nomeArquivo || '')} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
-<div class="total-destaque"><span>Total geral do ano</span><strong>R$ ${fmtBRL(r.totalGeral)}</strong></div>
+<div class="sub">${escapeHTML(info.nomeArquivo || '')} — ${escapeHTML(periodo.rotulo)} — gerado em ${escapeHTML(new Date().toLocaleString('pt-BR'))}</div>
+${periodo.modo !== 'todo' ? `<p class="hint" style="margin:-6px 0 16px;">Detalhamento por sub-item (Dívida Ativa, Corrente etc.) não é mostrado nessa exportação filtrada porque o PDF original só traz o total do ano inteiro pra cada sub-item, sem data — exporte o "Período inteiro" pra ver esse detalhamento.</p>` : ''}
+<div class="total-destaque"><span>${periodo.modo === 'todo' ? 'Total geral do ano' : 'Total geral do período'}</span><strong>R$ ${fmtBRL(r.totalGeral)}</strong></div>
 <div class="charts">
   <div class="chart-card">
     <h3>Arrecadado por tributo</h3>
@@ -727,6 +799,18 @@ function renderizarCardsAnos() {
       <div class="ano-card-header">
         <h2>Ano ${ano} <span class="hint" style="margin:0;">— ${escapeHTML(todos[ano].nomeArquivo || '')}</span></h2>
         <div class="ano-card-actions">
+          <select class="periodo-exportar" data-ano="${ano}" title="Período do PDF exportado">
+            <option value="todo">Período inteiro</option>
+            <option value="15">Últimos 15 dias</option>
+            <option value="30">Últimos 30 dias</option>
+            <option value="60">Últimos 60 dias</option>
+            <option value="90">Últimos 90 dias</option>
+            <option value="custom">Personalizado…</option>
+          </select>
+          <span class="periodo-custom-datas" data-ano="${ano}" style="display:none;">
+            <input type="date" class="periodo-de" data-ano="${ano}" aria-label="De">
+            <input type="date" class="periodo-ate" data-ano="${ano}" aria-label="Até">
+          </span>
           <button class="secondary btn-exportar-pdf-ano" data-ano="${ano}" type="button">Exportar PDF</button>
           <button class="btn-remover-ano" data-ano="${ano}">Remover ano</button>
         </div>
@@ -820,6 +904,13 @@ function renderizarCardsAnos() {
 
   anosCarregadosEl.querySelectorAll('.btn-exportar-pdf-ano').forEach(btn => btn.addEventListener('click', () => {
     exportarAnoPDF(btn.getAttribute('data-ano'));
+  }));
+
+  // Mostra os campos "De"/"Até" só quando o período escolhido pra exportação é "Personalizado".
+  anosCarregadosEl.querySelectorAll('.periodo-exportar').forEach(sel => sel.addEventListener('change', () => {
+    const ano = sel.getAttribute('data-ano');
+    const span = anosCarregadosEl.querySelector(`.periodo-custom-datas[data-ano="${ano}"]`);
+    if (span) span.style.display = sel.value === 'custom' ? 'inline-flex' : 'none';
   }));
 
   anosCarregadosEl.querySelectorAll('.btn-mov-pdf').forEach(btn => btn.addEventListener('click', () => {
