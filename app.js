@@ -20,6 +20,8 @@ const periodoComparadoEl = document.getElementById('periodoComparado');
 const destaquesVariacaoEl = document.getElementById('destaquesVariacao');
 const tabVariacaoEl = document.getElementById('tabVariacao');
 const btnExportarComparativoPDF = document.getElementById('btnExportarComparativoPDF');
+const chkPeriodoComum = document.getElementById('chkPeriodoComum');
+chkPeriodoComum.addEventListener('change', atualizarComparativo);
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
 
@@ -913,30 +915,42 @@ function atualizarComparativo() {
     return;
   }
 
-  // Janela comum (dia/mês) entre todos os anos marcados.
+  // Janela comum (dia/mês) entre todos os anos marcados — só se aplica quando o usuário deixa
+  // o checkbox "Comparar só o período em comum" marcado (padrão). Desmarcado, cada ano entra com
+  // seu total inteiro, igual ao total mostrado no card daquele ano lá em cima.
+  const restringirPeriodo = !chkPeriodoComum || chkPeriodoComum.checked;
   let janelaMin = -Infinity, janelaMax = Infinity;
   const dadosPorAno = {};
-  for (const ano of anosMarcados) {
-    const info = todos[ano];
-    if (!info) continue;
-    const datas = Object.keys(info.porData || {});
-    if (!datas.length) continue;
-    let anoMin = Infinity, anoMax = -Infinity;
-    for (const d of datas) { const v = mesDia(d); if (v < anoMin) anoMin = v; if (v > anoMax) anoMax = v; }
-    janelaMin = Math.max(janelaMin, anoMin);
-    janelaMax = Math.min(janelaMax, anoMax);
-    dadosPorAno[ano] = info;
-  }
 
-  if (!isFinite(janelaMin) || !isFinite(janelaMax) || janelaMin > janelaMax) {
-    periodoComparadoEl.textContent = 'Não há período em comum entre os anos marcados (as datas não se sobrepõem).';
-    if (chartComparativo) { chartComparativo.destroy(); chartComparativo = null; }
-    destaquesVariacaoEl.innerHTML = '';
-    tabVariacaoEl.innerHTML = '';
-    return;
-  }
+  if (restringirPeriodo) {
+    for (const ano of anosMarcados) {
+      const info = todos[ano];
+      if (!info) continue;
+      const datas = Object.keys(info.porData || {});
+      if (!datas.length) continue;
+      let anoMin = Infinity, anoMax = -Infinity;
+      for (const d of datas) { const v = mesDia(d); if (v < anoMin) anoMin = v; if (v > anoMax) anoMax = v; }
+      janelaMin = Math.max(janelaMin, anoMin);
+      janelaMax = Math.min(janelaMax, anoMax);
+      dadosPorAno[ano] = info;
+    }
 
-  periodoComparadoEl.textContent = `Comparando o período de ${fmtMesDia(janelaMin)} a ${fmtMesDia(janelaMax)} em cada ano marcado.`;
+    if (!isFinite(janelaMin) || !isFinite(janelaMax) || janelaMin > janelaMax) {
+      periodoComparadoEl.textContent = 'Não há período em comum entre os anos marcados (as datas não se sobrepõem). Desmarque "Comparar só o período em comum" pra ver o total de cada ano inteiro.';
+      if (chartComparativo) { chartComparativo.destroy(); chartComparativo = null; }
+      destaquesVariacaoEl.innerHTML = '';
+      tabVariacaoEl.innerHTML = '';
+      return;
+    }
+
+    periodoComparadoEl.textContent = `Comparando o período de ${fmtMesDia(janelaMin)} a ${fmtMesDia(janelaMax)} em cada ano marcado.`;
+  } else {
+    for (const ano of anosMarcados) {
+      const info = todos[ano];
+      if (info) dadosPorAno[ano] = info;
+    }
+    periodoComparadoEl.textContent = 'Comparando o ano inteiro de cada ano marcado (mesmo total dos cards acima).';
+  }
 
   // Soma, por ano e por tributo, só as datas dentro da janela comum.
   const somaPorAnoTributo = {}; // ano -> { tributo -> valor }

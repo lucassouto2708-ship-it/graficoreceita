@@ -163,8 +163,12 @@
         <button class="secondary" id="btnExportarComparativoPDF" type="button">Exportar PDF</button>
       </div>
     </div>
-    <p class="hint" style="margin-top:0;">Marque os anos que quer comparar. O comparativo soma só o período (dia/mês) em comum entre os anos marcados, pra não comparar 3 meses com o ano inteiro.</p>
+    <p class="hint" style="margin-top:0;">Marque os anos que quer comparar.</p>
     <div class="row" id="anosSalvosLista"></div>
+    <label class="hint" id="lblPeriodoComum" style="display:flex;align-items:center;gap:6px;margin-top:10px;cursor:pointer;">
+      <input type="checkbox" id="chkPeriodoComum" checked>
+      Comparar só o período (dia/mês) em comum entre os anos — evita comparar 3 meses de um ano com o ano inteiro do outro. Desmarque pra comparar o total de cada ano inteiro (mesmo total dos cards acima).
+    </label>
     <p id="periodoComparado" class="hint"></p>
     <div class="chart-canvas-wrap" style="height:320px;"><canvas id="chartComparativo"></canvas></div>
     <div id="destaquesVariacao"></div>
