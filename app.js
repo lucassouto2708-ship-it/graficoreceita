@@ -23,6 +23,29 @@ const btnExportarComparativoPDF = document.getElementById('btnExportarComparativ
 const chkPeriodoComum = document.getElementById('chkPeriodoComum');
 chkPeriodoComum.addEventListener('change', atualizarComparativo);
 
+// Alterna entre as abas "Por tributo" e "Movimentação diária" dentro do Comparativo entre anos —
+// os dois blocos ficam sempre montados no DOM (index.html), só a visibilidade muda aqui.
+document.querySelectorAll('.comp-aba-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    comparativoAba = btn.getAttribute('data-aba');
+    aplicarAbaComparativo();
+  });
+});
+function aplicarAbaComparativo() {
+  const abaTributo = document.getElementById('comp-aba-tributo');
+  const abaDiaria = document.getElementById('comp-aba-diaria');
+  if (abaTributo) abaTributo.style.display = comparativoAba === 'tributo' ? '' : 'none';
+  if (abaDiaria) abaDiaria.style.display = comparativoAba === 'diaria' ? '' : 'none';
+  document.querySelectorAll('.comp-aba-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-aba') === comparativoAba);
+  });
+  // O canvas pode ter nascido com a aba ainda escondida (largura zero nesse instante) — força o
+  // Chart.js a recalcular o tamanho agora que ficou visível.
+  if (comparativoAba === 'diaria' && chartComparativoDiario) {
+    requestAnimationFrame(() => chartComparativoDiario.resize());
+  }
+}
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
 
 function escapeHTML(s) {
@@ -35,6 +58,8 @@ let currentFile = null;
 let lastResult = null;
 const graficosPorSufixo = {};
 let chartComparativo = null;
+let chartComparativoDiario = null;
+let comparativoAba = 'tributo'; // 'tributo' | 'diaria' — aba ativa dentro do Comparativo entre anos
 const movDiariaAbertos = new Set(); // anos com a seção "Movimentação diária" expandida (sobrevive a re-renders)
 const movDiariaView = new Map(); // ano (string) -> 'grafico' | 'lista' — visão atual da Movimentação diária (sobrevive a re-renders)
 const CORES_GRAFICO = ['#2f5d8a', '#4f8fc0', '#7fb069', '#e0a458', '#c15b4a', '#8e6bab', '#4a9d8f', '#c98686', '#9aa5b1'];
@@ -910,8 +935,11 @@ function atualizarComparativo() {
   if (!anosMarcados.length) {
     periodoComparadoEl.textContent = 'Marque pelo menos um ano para ver o comparativo.';
     if (chartComparativo) { chartComparativo.destroy(); chartComparativo = null; }
+    if (chartComparativoDiario) { chartComparativoDiario.destroy(); chartComparativoDiario = null; }
     destaquesVariacaoEl.innerHTML = '';
     tabVariacaoEl.innerHTML = '';
+    document.getElementById('comparativoDiarioVazio').style.display = 'none';
+    aplicarAbaComparativo();
     return;
   }
 
@@ -938,8 +966,11 @@ function atualizarComparativo() {
     if (!isFinite(janelaMin) || !isFinite(janelaMax) || janelaMin > janelaMax) {
       periodoComparadoEl.textContent = 'Não há período em comum entre os anos marcados (as datas não se sobrepõem). Desmarque "Comparar só o período em comum" pra ver o total de cada ano inteiro.';
       if (chartComparativo) { chartComparativo.destroy(); chartComparativo = null; }
+      if (chartComparativoDiario) { chartComparativoDiario.destroy(); chartComparativoDiario = null; }
       destaquesVariacaoEl.innerHTML = '';
       tabVariacaoEl.innerHTML = '';
+      document.getElementById('comparativoDiarioVazio').style.display = '';
+      aplicarAbaComparativo();
       return;
     }
 
@@ -1004,6 +1035,74 @@ function atualizarComparativo() {
   });
 
   renderizarVariacao(anosMarcados, somaPorAnoTributo, tributos);
+  renderizarComparativoDiario(anosMarcados, dadosPorAno, todos, janelaMin, janelaMax);
+  aplicarAbaComparativo();
+}
+
+// Aba "Movimentação diária" do comparativo: sobrepõe, num gráfico de linha, a arrecadação de cada
+// dia dos anos marcados, alinhados por dia/mês (mesma lógica de `mesDia`/`fmtMesDia` usada no
+// recorte de período) — dá pra ver visualmente se um ano está arrecadando mais rápido que o outro
+// no mesmo trecho do calendário, não só o total do período.
+function renderizarComparativoDiario(anosMarcados, dadosPorAno, todos, janelaMin, janelaMax) {
+  const vazioEl = document.getElementById('comparativoDiarioVazio');
+  const canvas = document.getElementById('chartComparativoDiario');
+
+  const diarioPorAno = {}; // ano -> Map(mesDiaNum -> valor do dia)
+  const mesDiaSet = new Set();
+  for (const ano of anosMarcados) {
+    const info = dadosPorAno[ano];
+    if (!info) continue;
+    const mapa = new Map();
+    for (const [data, v] of Object.entries(info.porData || {})) {
+      const md = mesDia(data);
+      if (md < janelaMin || md > janelaMax) continue;
+      mapa.set(md, (mapa.get(md) || 0) + v);
+      mesDiaSet.add(md);
+    }
+    diarioPorAno[ano] = mapa;
+  }
+  const mesDiaOrdenados = [...mesDiaSet].sort((a, b) => a - b);
+
+  if (chartComparativoDiario) { chartComparativoDiario.destroy(); chartComparativoDiario = null; }
+
+  if (!mesDiaOrdenados.length) {
+    canvas.style.display = 'none';
+    vazioEl.style.display = '';
+    return;
+  }
+  canvas.style.display = '';
+  vazioEl.style.display = 'none';
+
+  chartComparativoDiario = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: mesDiaOrdenados.map(fmtMesDia),
+      datasets: anosMarcados.map((ano, i) => ({
+        label: String(ano),
+        data: mesDiaOrdenados.map(md => diarioPorAno[ano]?.get(md) ?? null),
+        borderColor: corDoAno(todos, ano, i),
+        backgroundColor: corDoAno(todos, ano, i),
+        spanGaps: false,
+        pointRadius: 2,
+        pointHoverRadius: 4,
+        tension: 0.15,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: R$ ${fmtBRL(ctx.parsed.y)}` } },
+      },
+      scales: {
+        x: { ticks: { maxRotation: 70, minRotation: 45, autoSkip: true, font: { size: 10 } } },
+        y: { ticks: { callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR') } },
+      },
+    },
+  });
 }
 
 // Mostra, entre os anos marcados (do mais antigo pro mais recente, considerando só o período em
