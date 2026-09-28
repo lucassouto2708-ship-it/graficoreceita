@@ -379,6 +379,7 @@ const CSS_EXPORT_BASE = `
   td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
   tr.total td{font-weight:700;border-top:2px solid #1f2430;border-bottom:none;background:#f5f7fa;}
   tr.tributo-row td{background:#fafbfc;font-weight:600;}
+  .tributo-cor{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:8px;vertical-align:middle;}
   tr.sub td{color:#667085;font-weight:400;}
   tr.sub td:first-child{padding-left:22px;}
   tr.detail-row{display:table-row !important;}
@@ -669,7 +670,7 @@ function exportarAnoPDF(ano) {
     return;
   }
 
-  const tabelaHTML = construirTabelaResumoHTML(r, `pdf${ano}`);
+  const tabelaHTML = construirTabelaResumoHTML(r, `pdf${ano}`, true);
   const tabelaDiariaHTML = construirTabelaDiariaHTML(r, `pdfdia${ano}`);
   const imgPizza = gerarImagemGraficoPizza(r);
   const imgLinha = gerarImagemGraficoLinha(r);
@@ -1780,13 +1781,19 @@ function fmtBRL(v) {
 // ── Renderização ────────────────────────────────────────────────────────────
 // Constrói o HTML da tabela de resumo (acordeão) para um resultado `r`. `idPrefix` garante que os
 // ids das linhas de detalhe não colidam quando há vários cards (um por ano) na mesma página.
-function construirTabelaResumoHTML(r, idPrefix) {
+// `comCores`, usado na exportação em PDF, desenha ao lado de cada tributo um quadradinho com a
+// mesma cor que ele tem no gráfico de pizza — mesma ordenação (maior valor primeiro) usada lá, então
+// o índice `i` daqui cai exatamente na mesma cor de `CORES_GRAFICO` que o gráfico já usa.
+function construirTabelaResumoHTML(r, idPrefix, comCores = false) {
   const linhas = [...r.porTributo.entries()].sort((a, b) => b[1] - a[1]);
   let corpo = '';
   linhas.forEach(([nome, v], i) => {
     const sub = r.porSub.get(nome);
     const temDetalhe = sub && sub.size;
-    corpo += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${escapeHTML(nome)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
+    const corQuadrado = comCores
+      ? `<span class="tributo-cor" style="background:${CORES_GRAFICO[i % CORES_GRAFICO.length]}"></span>`
+      : '';
+    corpo += `<tr class="tributo-row" data-idx="${i}"><td><span class="caret">${temDetalhe ? '▶' : ''}</span></td><td>${corQuadrado}${escapeHTML(nome)}</td><td class="num">${fmtBRL(v)}</td></tr>`;
     if (temDetalhe) {
       const linhasSub = [...sub.entries()].sort((a, b) => b[1] - a[1]);
       corpo += `<tr class="detail-row" id="detail-${idPrefix}-${i}" style="display:none;"><td></td><td colspan="2">
