@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard de Recuperação</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--tx:#1b2430;--mut:#6b7686;--bd:#e3e8ef;--az:#2563eb;--vd:#16a34a;--lj:#ea580c;--rx:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#18202b;--tx:#e8edf3;--mut:#93a0b1;--bd:#263241}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px}
+h1{font-size:1.25rem;margin:0}.sub{color:var(--mut);font-size:.85rem}
+button{background:var(--az);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:.9rem;cursor:pointer}
+main{padding:0 16px 32px;max-width:1100px;margin:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+.card .l{color:var(--mut);font-size:.8rem}.card .v{font-size:1.6rem;font-weight:700;margin-top:4px}
+.card .s{color:var(--mut);font-size:.8rem;margin-top:4px}
+h2{font-size:1rem;margin:0 0 10px}
+.box{margin-top:12px}.bar{height:14px;background:var(--bd);border-radius:7px;overflow:hidden;margin:10px 0 6px}
+.bar i{display:block;height:100%;background:var(--vd)}
+.chart{position:relative;height:280px}
+#msg{padding:14px;margin:0 16px 12px;border-radius:10px;background:#fff3cd;color:#664d03;display:none;max-width:1100px;margin-inline:auto}
+.row{display:flex;justify-content:space-between;font-size:.9rem}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Dashboard de Recuperação</h1><div class="sub" id="upd">Carregando…</div></div>
+  <button id="rel">Atualizar</button>
+</header>
+<div id="msg"></div>
+<main>
+  <section class="grid">
+    <div class="card"><div class="l">Valor atual total</div><div class="v" id="kTotal">–</div><div class="s" id="kTotalS"></div></div>
+    <div class="card"><div class="l">Tentativas feitas</div><div class="v" id="kTent">–</div><div class="s" id="kTentS"></div></div>
+    <div class="card"><div class="l">Já recuperado (pago)</div><div class="v" id="kRec" style="color:var(--vd)">–</div><div class="s" id="kRecS"></div></div>
+    <div class="card"><div class="l">Parcelamento a receber</div><div class="v" id="kAReceber" style="color:var(--lj)">–</div><div class="s" id="kARecS"></div></div>
+  </section>
+
+  <section class="card box">
+    <h2>Tentativas por dia</h2>
+    <div class="chart"><canvas id="cTent"></canvas></div>
+  </section>
+
+  <section class="card box">
+    <h2>Parcelamento: pago x a receber</h2>
+    <div class="bar"><i id="pBar" style="width:0"></i></div>
+    <div class="row"><span>Pago: <b id="pPago">–</b></span><span>A receber: <b id="pAber">–</b></span></div>
+    <div class="s sub" id="pInfo" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card box">
+    <h2>Recuperado x em aberto (cobrança)</h2>
+    <div class="chart" style="height:220px"><canvas id="cRec"></canvas></div>
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
