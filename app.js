@@ -344,8 +344,9 @@ async function handleAlimentarAnoComPDF(ano, file) {
     const novoCard = document.getElementById(`ano-card-${ano}`);
     if (novoCard) {
       const novoStatus = novoCard.querySelector('.mov-pdf-status');
-      novoStatus.textContent = `"${file.name}" somado ao ano ${ano} (Total Geral do PDF: R$ ${fmtBRL(resultado.totalGeral)}).`;
-      novoStatus.style.color = 'var(--good)';
+      const aviso = avisoDivergenciaDatas(resultado);
+      novoStatus.textContent = `"${file.name}" somado ao ano ${ano} (Total Geral do PDF: R$ ${fmtBRL(resultado.totalGeral)}).${aviso}`;
+      novoStatus.style.color = aviso ? 'var(--warn)' : 'var(--good)';
     }
   } catch (err) {
     console.error(err);
@@ -1451,7 +1452,9 @@ btnProcess.addEventListener('click', async () => {
     lastResult = resultado;
     renderizarResultado(resultado);
     btnExport.disabled = false;
-    statusEl.textContent = 'Concluído.';
+    const aviso = avisoDivergenciaDatas(resultado);
+    statusEl.textContent = 'Concluído.' + aviso;
+    statusEl.style.color = aviso ? 'var(--warn)' : '';
     salvarResultadoNoCache(resultado);
   } catch (err) {
     console.error(err);
@@ -1772,6 +1775,22 @@ function parseMinuta(texto) {
 
 function parseValorBR(s) {
   return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+}
+
+// Depois de parsear um PDF, confere se o total por tributo (via "TOTAL DESTE TRIBUTO", linha que
+// NÃO depende de ter reconhecido a data do trecho) bate, numa margem normal de OCR, com a soma das
+// datas reconhecidas (via "TOTAL DESTA DATA", outra leitura separada — ver comentário em
+// parseMinuta). Os dois já podem divergir alguns reais por imprecisão normal do OCR, mas uma
+// divergência grande é sinal de que o OCR não reconheceu a data de um trecho do relatório: o valor
+// ainda entra no Total Geral/Resumo por tributo (que não depende de data), só que não aparece
+// atribuído a nenhum dia na Arrecadação diária/Movimentação diária — silenciosamente, sem erro
+// nenhum. Esse aviso existe pra isso não passar batido.
+function avisoDivergenciaDatas(resultado) {
+  if (!resultado.totalGeral || resultado.totalGeral <= 0) return '';
+  const totalPorData = [...resultado.porData.values()].reduce((s, v) => s + v, 0);
+  const divergencia = Math.abs(resultado.totalGeral - totalPorData);
+  if (divergencia < 50 || divergencia / resultado.totalGeral < 0.05) return '';
+  return ` ⚠️ Atenção: o total por tributo (R$ ${fmtBRL(resultado.totalGeral)}) não bate com a soma das datas reconhecidas (R$ ${fmtBRL(totalPorData)}) — diferença de R$ ${fmtBRL(divergencia)}. Isso costuma acontecer quando o OCR não reconhece a data de um trecho do PDF: o valor entra no total, mas pode faltar (ou ficar incompleto) na Arrecadação diária/Movimentação diária. Vale conferir esse PDF — se precisar, reprocesse em partes menores.`;
 }
 
 function fmtBRL(v) {
